@@ -290,7 +290,7 @@ func mcpCallTool(w http.ResponseWriter, id any, params map[string]any) {
 		num := rp.NumSeq
 		seq := store.nextSeq()
 		id2 := 2000000 + int(seq)
-		iss := &Issue{ID: id2, GID: globalID("Issue", id2), Number: num, Title: title, Body: argStrMCP(args, "body"), State: "open", Seq: seq}
+		iss := &Issue{ID: id2, GID: globalID("Issue", id2), Number: num, Title: title, Body: argStrMCP(args, "body"), State: "open", Seq: seq, TS: tsOf(seq)}
 		rp.Issues = append(rp.Issues, iss)
 		rp.IssueByNum[num] = iss
 		store.mu.Unlock()

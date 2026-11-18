@@ -637,7 +637,7 @@ func (ex *gqlExecutor) resolveMutation(f *gqlField) any {
 		num := rp.NumSeq
 		seq := store.nextSeq()
 		id := 2000000 + int(seq)
-		iss := &Issue{ID: id, GID: globalID("Issue", id), Number: num, Title: title, Body: body, State: "open", Seq: seq}
+		iss := &Issue{ID: id, GID: globalID("Issue", id), Number: num, Title: title, Body: body, State: "open", Seq: seq, TS: tsOf(seq)}
 		rp.Issues = append(rp.Issues, iss)
 		rp.IssueByNum[num] = iss
 		store.mu.Unlock()

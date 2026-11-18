@@ -34,15 +34,23 @@ func main() {
 	if envURL == "" {
 		// Local / test mode: serve forever.
 		fmt.Fprintf(os.Stderr, "forge listening on :%d (no MAKEFUN_ENV_URL)\n", port)
+		if rawHTTPEnabled() {
+			serveRaw(ln, handler())
+			return
+		}
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "serve:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	go func() {
-		_ = srv.Serve(ln)
-	}()
+	if rawHTTPEnabled() {
+		go serveRaw(ln, handler())
+	} else {
+		go func() {
+			_ = srv.Serve(ln)
+		}()
+	}
 	// Register with the harness, retrying until it answers.
 	regURL := strings.TrimRight(envURL, "/") + "/register"
 	body, _ := json.Marshal(map[string]int{"port": port})

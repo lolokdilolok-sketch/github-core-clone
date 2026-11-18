@@ -652,8 +652,12 @@ func gitReceivePack(w http.ResponseWriter, r *http.Request) {
 				results[i] = result{false, "non-fast-forward"}
 				continue
 			}
-			// FF check: old must be an ancestor of new
-			if !rp.ancestors([]string{c.newOID})[cur] {
+			// FF check: old must be an ancestor of new. Walk from new with an
+			// early exit instead of enumerating the whole ancestor set: in
+			// the common case old is new's immediate parent, so this is one
+			// step instead of a full-history BFS (the push workload's chain
+			// grows to 200 commits, making the BFS quadratic overall).
+			if !rp.isAncestor(cur, c.newOID) {
 				results[i] = result{false, "non-fast-forward"}
 				continue
 			}

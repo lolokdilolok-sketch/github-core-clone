@@ -147,6 +147,90 @@ func issueJSON(rp *Repo, iss *Issue) map[string]any {
 	}
 }
 
+// appendJSONString appends s as a JSON string literal. Fast path when no
+// byte needs escaping (the common case for titles, bodies and labels);
+// the slow path escapes exactly what JSON requires (", \, control chars).
+// Unlike encoding/json it does not \u-escape <, > or & — JSON parsers read
+// both forms identically, and every consumer here parses the JSON.
+func appendJSONString(dst []byte, s string) []byte {
+	dst = append(dst, '"')
+	start := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == '"' || c == '\\' {
+			dst = append(dst, s[start:i]...)
+			switch c {
+			case '"':
+				dst = append(dst, '\\', '"')
+			case '\\':
+				dst = append(dst, '\\', '\\')
+			case '\n':
+				dst = append(dst, '\\', 'n')
+			case '\r':
+				dst = append(dst, '\\', 'r')
+			case '\t':
+				dst = append(dst, '\\', 't')
+			default:
+				const hexd = "0123456789abcdef"
+				dst = append(dst, '\\', 'u', '0', '0', hexd[c>>4], hexd[c&0xf])
+			}
+			start = i + 1
+		}
+	}
+	dst = append(dst, s[start:]...)
+	return append(dst, '"')
+}
+
+// issueJSONBytes renders one issue as JSON without reflection or map
+// allocation. Field set and values are identical to issueJSON; only the
+// encoder differs. Used on the hot REST paths (GET/POST/PATCH one issue).
+// iss.TS is the precomputed created_at/updated_at (both are tsOf(Seq)).
+func issueJSONBytes(rp *Repo, iss *Issue) []byte {
+	ts := iss.TS
+	if ts == "" {
+		ts = tsOf(iss.Seq)
+	}
+	b := make([]byte, 0, 768)
+	b = append(b, '{')
+	b = append(b, `"id":`...)
+	b = strconv.AppendInt(b, int64(iss.ID), 10)
+	b = append(b, `,"node_id":`...)
+	b = appendJSONString(b, iss.GID)
+	b = append(b, `,"number":`...)
+	b = strconv.AppendInt(b, int64(iss.Number), 10)
+	b = append(b, `,"title":`...)
+	b = appendJSONString(b, iss.Title)
+	b = append(b, `,"body":`...)
+	b = appendJSONString(b, iss.Body)
+	b = append(b, `,"state":`...)
+	b = appendJSONString(b, iss.State)
+	b = append(b, `,"labels":[`...)
+	for i, l := range iss.Labels {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, `{"name":`...)
+		b = appendJSONString(b, l)
+		b = append(b, `,"color":"ededed"}`...)
+	}
+	b = append(b, `],"comments":`...)
+	b = strconv.AppendInt(b, int64(len(iss.Comments)), 10)
+	b = append(b, `,"user":{"login":"adaiversen","id":1000}`...)
+	b = append(b, `,"created_at":`...)
+	b = appendJSONString(b, ts)
+	b = append(b, `,"updated_at":`...)
+	b = appendJSONString(b, ts)
+	b = append(b, `,"closed_at":null,"repository_url":`...)
+	repoURL := "/api/v3/repos/" + rp.Owner + "/" + rp.Name
+	b = appendJSONString(b, repoURL)
+	b = append(b, `,"url":`...)
+	b = appendJSONString(b, repoURL+"/issues/"+strconv.Itoa(iss.Number))
+	b = append(b, `,"html_url":`...)
+	b = appendJSONString(b, "https://example.invalid/"+rp.Owner+"/"+rp.Name+"/issues/"+strconv.Itoa(iss.Number))
+	b = append(b, '}')
+	return b
+}
+
 func prJSON(rp *Repo, pr *PR) map[string]any {
 	mergedAt := any(nil)
 	if pr.Merged {
@@ -763,11 +847,11 @@ func restIssues(w http.ResponseWriter, r *http.Request, rp *Repo, rest []string)
 			seq := store.nextSeq()
 			id := 2000000 + int(seq)
 			iss := &Issue{ID: id, GID: globalID("Issue", id), Number: num, Title: title,
-				Body: strField(m, "body"), State: "open", Labels: labels, Seq: seq}
+				Body: strField(m, "body"), State: "open", Labels: labels, Seq: seq, TS: tsOf(seq)}
 			rp.Issues = append(rp.Issues, iss)
 			rp.IssueByNum[num] = iss
 			store.mu.Unlock()
-			writeJSON(w, 201, issueJSON(rp, iss))
+			writeJSONBytes(w, 201, issueJSONBytes(rp, iss))
 		default:
 			errJSON(w, 404, "Not Found")
 		}
@@ -786,7 +870,7 @@ func restIssues(w http.ResponseWriter, r *http.Request, rp *Repo, rest []string)
 	if len(rest) == 1 {
 		switch r.Method {
 		case "GET":
-			writeJSON(w, 200, issueJSON(rp, iss))
+			writeJSONBytes(w, 200, issueJSONBytes(rp, iss))
 		case "PATCH":
 			m, err := readJSONBody(w, r)
 			if err != nil {
@@ -809,7 +893,7 @@ func restIssues(w http.ResponseWriter, r *http.Request, rp *Repo, rest []string)
 				}
 			}
 			store.mu.Unlock()
-			writeJSON(w, 200, issueJSON(rp, iss))
+			writeJSONBytes(w, 200, issueJSONBytes(rp, iss))
 		default:
 			errJSON(w, 404, "Not Found")
 		}

@@ -162,6 +162,7 @@ type Issue struct {
 	State    string // open | closed
 	Labels   []string
 	Seq      int64
+	TS       string // precomputed tsOf(Seq): created_at == updated_at for issues
 	Comments []*Comment
 }
 
@@ -560,6 +561,40 @@ func splitLines(b []byte) []string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// isAncestor reports whether anc is reachable from tip (anc == tip counts).
+// Same reachable set as ancestors(), but stops as soon as anc is found.
+func (r *Repo) isAncestor(anc, tip string) bool {
+	if anc == tip {
+		return true
+	}
+	seen := map[string]bool{}
+	queue := []string{tip}
+	for len(queue) > 0 {
+		oid := queue[0]
+		queue = queue[1:]
+		if seen[oid] {
+			continue
+		}
+		seen[oid] = true
+		if oid == anc {
+			return true
+		}
+		o := r.getObj(oid)
+		if o == nil {
+			continue
+		}
+		switch o.Type {
+		case "commit":
+			queue = append(queue, o.Commit().Parents...)
+		case "tag":
+			if tgt := tagTarget(o); tgt != "" {
+				queue = append(queue, tgt)
+			}
+		}
+	}
+	return false
 }
 
 // ancestors returns commit oids reachable from tips (BFS, children first).
