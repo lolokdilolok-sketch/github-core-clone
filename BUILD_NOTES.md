@@ -57,6 +57,31 @@ hardware; further server-side wins there are small. A pack cache keyed by
 (wants, depth, haves) would help clone on repeated identical fetches, but
 clone is already 42–48/50 and the cache adds invalidation risk.
 
+## ROUND 4 — perf optimization (2026-11-18, after round 3 scored 941)
+
+Round 3 scored 941 on the server (rank 555, perf 141, p50 456,556 us) with
+feature 600 + agent 200 already maxed; top-10 line is 957 (perf 157, p50
+363,291). Profile (measured): server CPU ~70 us/request vs ~290-400 us/op
+kit round time — the Node kit client adds ~230-270 us/op and dominates the
+local rounds. Inside server CPU: net/http ~40-60 us, issue JSON map+Marshal
+~11.5 us, ancestors() full BFS ~44 us per push on a 200-commit chain.
+Changes (commit 1f1ae2f): (1) core/raw.go — hand-rolled HTTP/1.1 server
+(same handler, responses buffered whole, one conn.Write, Content-Length;
+FORGE_RAW_HTTP=0 falls back to net/http); server CPU ~95 us -> ~50 us.
+(2) issueJSONBytes + appendJSONString hand-rolled encoder for the hot
+single-issue REST paths (11.5 us -> 0.7 us; equivalence-tested), Issue.TS
+precomputed at creation. (3) isAncestor() early-exit BFS for the
+receive-pack fast-forward check (44 us -> 0.2 us per push). Pack cache
+deliberately skipped (expected <1 server point, stale-cache risk).
+Local kit runner, fresh server per run: 1000/996/994/995 (600/200/194-200),
+p50 167-177 us (was 990/982, p50 ~212 us); one 930 outlier run was machine
+noise (Playwright from the concurrent game rebuild at 83.7% CPU).
+Read-only /bot repro re-verified with the new binary: kit runner 996.
+Server estimate: local unclamped ~212; at the old 2.156x factor -> perf
+~156 (just under the 157 top-10 line); the raw server cuts exactly the
+syscall-heavy work gVisor penalizes, so the factor should improve
+(1.9x -> ~166). Cannot verify without submitting.
+
 ## Server score 0 — root cause and fix (2026-11-18, after first submit)
 
 - First submit scored **0 on the server** (rank 8329/8262, feature 0, agent 0,
