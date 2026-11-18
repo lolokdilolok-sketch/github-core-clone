@@ -57,6 +57,26 @@ hardware; further server-side wins there are small. A pack cache keyed by
 (wants, depth, haves) would help clone on repeated identical fetches, but
 clone is already 42–48/50 and the cache adds invalidation risk.
 
+## Server score 0 — root cause and fix (2026-11-18, after first submit)
+
+- First submit scored **0 on the server** (rank 8329/8262, feature 0, agent 0,
+  perf 0, p50 1e9 sentinel, working 0) despite local runs of 991/966/983.
+  Root cause: the `forge` binary in the GitHub repo had git mode **100644**
+  (not executable) — the GitHub web UI stores every uploaded file as 100644
+  and strips the exec bit. The grader checks out the repo, `main.ts` spawns
+  `./forge`, the spawn fails with **EACCES**, the program never binds a port.
+  Reproduced locally: scratch copy with every file chmod 644 + old `main.ts`
+  → `[entry] failed to start forge: spawn .../forge EACCES`, exit 127.
+- Fix: `main.ts` now runs `fs.chmodSync(binary, 0o755)` in a try/catch
+  (logs a warning, still attempts the spawn) **before** spawning `./forge`.
+  Verified from a full-644 scratch copy: server starts (forge mode becomes
+  755 at runtime), local runner **992** (feature 600, agent 200, perf 192,
+  p50 203,653 µs, 120/120, MCP 15/15). Re-run from the normal repo state:
+  also **992** (p50 220,003 µs). No regression.
+- Resubmit note: the fix must go up in a NEW commit; the browser upload
+  will strip the exec bit again, which is now harmless because `main.ts`
+  re-applies it at runtime. Submit with the NEW GitHub HEAD SHA.
+
 ## Bugs found and fixed during testing
 
 1. v2 `ls-refs`: peel must be an attribute on the ref line, not a second
