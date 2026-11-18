@@ -73,9 +73,33 @@ clone is already 42–48/50 and the cache adds invalidation risk.
   755 at runtime), local runner **992** (feature 600, agent 200, perf 192,
   p50 203,653 µs, 120/120, MCP 15/15). Re-run from the normal repo state:
   also **992** (p50 220,003 µs). No regression.
+- **UPDATE 2026-11-18 22:31 WIB — the chmod fix did NOT work on the server.**
+  Round 2 (same commit 017b274, received 15:12:11Z) still scored **0 on every
+  column** (rank 8360/8360, working 0, p50 1e9). The 644 scratch-copy test
+  was a false negative: chmod only needs file *ownership*, not writability,
+  so it succeeded on the writable scratch copy. The kit's RULES.txt states
+  the grading pod runs with a **read-only /bot** ("a read-only /bot (your
+  repository at the submitted commit)"), and on a read-only mount chmod
+  fails with EROFS for every user including root. Reproduced faithfully
+  with `unshare -rm` + read-only bind mount of the repo: `[entry] warning:
+  could not chmod forge: EROFS: read-only file system` then `[entry] failed
+  to start forge: spawn /tmp/clone-ro/forge EACCES`, no register — exactly
+  the server's signature.
+- **Real fix (2026-11-18 ~22:40 WIB):** `main.ts` now resolves the
+  executable in `resolveExecutable()`: try chmod in place; check
+  `accessSync(X_OK)`; if still not executable, copy the binary to a fresh
+  `mkdtempSync(os.tmpdir()/forge-)` dir, chmod the *copy* 0o755, and spawn
+  the copy. Verified under the SAME read-only reproduction: registers,
+  kit runner **990** (feature 600, agent 200, perf 190, 120/120, MCP 15/15,
+  p50 216,194 µs, working 1). Verified under a normal writable checkout:
+  **994** (perf 194, p50 205,426 µs, working 1), no copy needed, no
+  regression. The binary is statically linked ELF x86-64 (verified with
+  `file`/`ldd`); Node 22 vs 24 is not a factor (the kit's own starter
+  main.ts uses type annotations and runs as `node /bot/main.ts` on Node 22;
+  this entry uses only stable stdlib APIs).
 - Resubmit note: the fix must go up in a NEW commit; the browser upload
   will strip the exec bit again, which is now harmless because `main.ts`
-  re-applies it at runtime. Submit with the NEW GitHub HEAD SHA.
+  either re-applies it in place or runs a writable copy from tmpdir.
 
 ## Bugs found and fixed during testing
 
